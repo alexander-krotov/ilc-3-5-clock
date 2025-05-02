@@ -44,21 +44,21 @@ Driver pins to VFD connection table:
 
 MAX6921 IO | MAX6921 Pin | VFD Pin | VFD Pin purpose
 --- | --- | --- | --- 
-12  |  12 | 33 | А segment
-9   |  15 | 32 | Б segment
-13  |  11 | 31 | В segment
-8   |  16 | 30 | Г segment
-14  |  17 | 29 | E segment
-7   |  10 | 28 | 1 digit
-15  |  18 | 25 | 2 digit
-6   |   9 | 22 | separator dots
-16  |  19 | 19 | 3 digit
-5   |   5 | 15 | 4 segment
-17  |  22 | 11 | weekday digit
-4   |   4 | 7  | 5 digit
-18  |  22 | 4  | Ж segment
-3   |   3 | 3  | Д segment
-19  |  23 | 2  | U6, U3, U2, U1, K
+10  |  12 | 33 | А segment
+7   |  15 | 32 | Б segment
+5   |  11 | 31 | В segment
+11  |  16 | 30 | Г segment
+6   |  17 | 29 | E segment
+12  |  10 | 28 | 1 digit
+7   |  18 | 25 | 2 digit
+13  |   9 | 22 | separator dots
+8   |  18 | 19 | 3 digit
+17  |   5 | 15 | 4 segment
+5   |  21 | 11 | weekday digit
+18  |   4 | 7  | 5 digit
+4   |  22 | 4  | Ж segment
+19  |   3 | 3  | Д segment
+3   |  23 | 2  | U6, U3, U2, U1, K
 X   |  X  | 34 | Cathode
 X   |  X  | 1  | Cathode
 
