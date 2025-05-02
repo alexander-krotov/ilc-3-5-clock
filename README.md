@@ -1,6 +1,6 @@
-# IV28-clock
-Digital clock with soviet-made IV-28 (ИВ-28 in Russian) VFD indicator.
-
+# ILC-3-5-clock
+Digital clock with soviet-made ILC-3-5 (ИЛЦ-3-5/7 in Russian) VFD indicator.
+  
 Clock is driven by ESP32 C3 Super mini, MAX6921 is used to drive VFD. Indicator I got is Soviet-made IV-28 produced in December 1988.
 
 ![clock text](https://github.com/alexander-krotov/IV28-clock/blob/main/clock.jpg?raw=true)
@@ -12,27 +12,29 @@ Easy setup instructions are very similar to: https://github.com/alexander-krotov
 
 ## Software
 
-Clock firmware is derived from a previous clock formware I did for Apollo clock https://github.com/alexander-krotov/apollo-clock
-The biggest difference is that it uses MAX6921 VFD driver to drive the display.
-Also provides controls for Si4703 RDS module, but in this version RDS is not used.
+Clock firmware is derived from a previous clock formware I did for IV-28 clock https://github.com/alexander-krotov/IV28-clock
+Also it provides controls for Si4703 RDS module.
 
 Firmware uses NetworkManager for WiFi configuration, Web UI is based on GyverPortal library.
 
-If connected to WiFi, the clock uses NTP to get the time. Backup RTC is implemented with DS3231 library.
+If connected to WiFi, the clock uses NTP to get the time.
 
 References to software components:
 - WiFi Manager https://github.com/tzapu/WiFiManager
-- DS3231 https://github.com/NorthernWidget/DS3231
 - GyverPortal https://github.com/GyverLibs/GyverPortal
 
 ## Hardware
 
 Hardware schematics:
+
+It is exacly the same as https://github.com/alexander-krotov/IV28-clock
+The only difference is R1 resisor. The indicator sinks 100mA cathode current and R1 should be 22R 1W (PCB design allows that).
+
 https://oshwlab.com/alexander.krotov/iv-18-clock_copy_copy
 
-Clock is powered from USB 5v power supply, it could be provided via ESP32 module connector. It eats about 80mA, peaking to 150mA.
+Clock is powered from USB 5v power supply, it could be provided via ESP32 module connector. It eats about XXXmA, peaking to XXXmA.
 
-IV-28 VFD display needs 24v power supply. It is provided by a charge pump implemented in hardware.
+ILC-3-5 VFD display needs 24v power supply. It is provided by a charge pump implemented in hardware.
 
 DS3231 is used as a backup Real-Time clock (RTC).
 
@@ -42,28 +44,26 @@ Driver pins to VFD connection table:
 
 MAX6921 IO | MAX6921 Pin | VFD Pin | VFD Pin purpose
 --- | --- | --- | --- 
-10  |  12 | 18 | A segment
-11  |  11 | 17 | 1 digit
-12  |  10 | 16 | C segment
-9   |  17 | 15 | 2 digit
-13  |   9 | 14 | E segment
-8   |  18 | 13 | 3 digit
-14  |   8 | 12 | DP segment
-7   |  19 | 11 | 4 digit
-15  |   7 | 10 | 5 digit
-6   |  20 | 9  | F segment
-16  |   6 | 8  | 6 digit
-5   |  21 | 7  | B segment
-17  |   5 | 6  | 7 digit
-4   |  22 | 5  | D segment
-18  |   4 | 4  | 8 digit
-3   |  23 | 3  | B segment
-19  |   3 | 2  | 9 digit
-X   |  X  | 19 | Cathode
+12  |  12 | 33 | А segment
+9   |  15 | 32 | Б segment
+13  |  11 | 31 | В segment
+8   |  16 | 30 | Г segment
+14  |  17 | 29 | E segment
+7   |  10 | 28 | 1 digit
+15  |  18 | 25 | 2 digit
+6   |   9 | 22 | separator dots
+16  |  19 | 19 | 3 digit
+5   |   5 | 15 | 4 segment
+17  |  22 | 11 | weekday digit
+4   |   4 | 7  | 5 digit
+18  |  22 | 4  | Ж segment
+3   |   3 | 3  | Д segment
+19  |  23 | 2  | U6, U3, U2, U1, K
+X   |  X  | 34 | Cathode
 X   |  X  | 1  | Cathode
 
 
 References to components:
-- IV-28 datasheet https://static.chipdip.ru/lib/280/DOC006280539.pdf
+- ILС-3-5 datasheet https://www.quartz1.com/price/techdata/%D0%98%D0%9B%D0%A63-5-7%20%D1%82%D0%B8%D0%BF1.pdf 
 - ESP32 C3 super mini https://dl.artronshop.co.th/ESP32-C3%20SuperMini%20datasheet.pdf
 - MAX6921 VFD driver https://www.analog.com/media/en/technical-documentation/data-sheets/max6921-max6931.pdf
