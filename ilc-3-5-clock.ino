@@ -1,8 +1,11 @@
-// IV-28 clock with ESP32 C3 super mini
+// ILC-3-5 clock with ESP32 C3 super mini
 //
-// https://github.com/alexander-krotov/IV28-clock
+// https://github.com/alexander-krotov/ilc-3-5-clock
 //
 // Copyright (c) 2025 Alexander Krotov.
+//
+// Code is mostly derived from
+// https://github.com/alexander-krotov/IV28-clock
 //
 // NTP related code is derived from TimeNTP sample.
 // Si4703 related code is derived from Si4703 sample.
@@ -45,7 +48,6 @@ char rdsBuffer[16];
 
 // Display data: digits and dots.
 char disp_text[]="0123456789";
-bool dots[10];
 
 // NTP update interval in seconds
 const int NTP_UPDATE_INTERVAL=3000;
@@ -56,12 +58,11 @@ const struct timezone tz = {0, 0};
 // Clock global configuration.
 char ntpServerName[80] = "fi.pool.ntp.org";
 signed char clock_tz = 2; // Timezone shift (could be negative)
-unsigned char clock_12 = 0;  // If non-zero clock is 12h, otherwise 24h
-unsigned char clock_leading_0;  // Show hour leading 0
 unsigned char clock_bar_mode = 0;   // bar mode
 unsigned char clock_use_ntp = true;  // Use NTP switch
-unsigned char clock_use_rtc = true;  // Use RTC switch
+unsigned char clock_use_rtc = false;  // Use RTC switch
 unsigned char clock_use_rds = true;  // Use RDS switch
+unsigned char clock_show_weekday = true;
 
 // Clock eeprom data address.
 const int eeprom_addr=12;
@@ -78,11 +79,8 @@ void read_eeprom_data()
   // Read the EEPROM settings.
   clock_tz = (signed char)EEPROM.read(eeprom_addr);
   volume = EEPROM.read(eeprom_addr+1);
-  clock_12 = EEPROM.read(eeprom_addr+2);
-  clock_leading_0 = EEPROM.read(eeprom_addr+3);
   clock_bar_mode = EEPROM.read(eeprom_addr+4);
   clock_use_ntp = EEPROM.read(eeprom_addr+5);
-  clock_use_rtc = EEPROM.read(eeprom_addr+6);
   clock_use_rds = EEPROM.read(eeprom_addr+7);
   channel = EEPROM.readInt(eeprom_addr+8);
   EEPROM.readString(eeprom_addr+12, ntpServerName, sizeof(ntpServerName)-1);
@@ -94,11 +92,11 @@ void write_eeprom_data()
 {
   EEPROM.write(eeprom_addr, clock_tz);
   EEPROM.write(eeprom_addr+1, volume);
-  EEPROM.write(eeprom_addr+2, clock_12);
-  EEPROM.write(eeprom_addr+3, clock_leading_0);
+  // EEPROM.write(eeprom_addr+2, clock_12);
+  // EEPROM.write(eeprom_addr+3, clock_leading_0);
   EEPROM.write(eeprom_addr+4, clock_bar_mode);
   EEPROM.write(eeprom_addr+5, clock_use_ntp);
-  EEPROM.write(eeprom_addr+6, clock_use_rtc);
+  // EEPROM.write(eeprom_addr+6, clock_use_rtc);
   EEPROM.write(eeprom_addr+7, clock_use_rds);
   EEPROM.writeInt(eeprom_addr+8, channel);
   EEPROM.writeString(eeprom_addr+12, ntpServerName);
@@ -191,7 +189,6 @@ void setup()
 void run_string_on_display(const char *str)
 {
     int display[6];
-    int clock_dots[6] = {0};
     int len = strlen(str);
 
     log_printf("run_string_on_display: str=%s len=%d\n", str, len);
@@ -288,7 +285,7 @@ void loop()
   // same time share.
   static unsigned int i=0;
 
-  if (i%128 == 0) {
+  if (i%16 == 0) {
     int h, m, s;
     if (clock_use_rtc && i%(1024*1024) == 0) {
         get_time_from_rtc();
@@ -304,14 +301,14 @@ void loop()
     m = ttm->tm_min;
     h = ttm->tm_hour;
 
-    if (clock_12 && h>12) {
+    if (h>12) {
       h-=12;
     }
 
     // log_printf("Chip time %02d:%02d:%02d\n", h, m, s);
 
-    if (h>=10 || clock_leading_0) {   
-      disp_text[0] = h/10+'0';
+    if (h>=10) {   
+      disp_text[0] = '1';
     } else {
       disp_text[0] = ' ';
     }
@@ -338,19 +335,14 @@ void loop()
     }
   }
 
-  for (int j=0; j<8; j++) {
-    show_display(j);
-    delayMicroseconds(50);
-  }
-  send_spi_data(0);
+  show_display(1+i%7);
   i++;
-
   // loop_radio();
 
   // Web UI tick.
-  if (i%128==0) {
-    ui.tick();
-  }
+  // if (i%15==0) {
+  //   ui.tick();
+  // }
 }
 
 // ========================================================================================
@@ -391,12 +383,10 @@ void build()
     "Clock config",
     GP_MAKE_BOX(GP.LABEL("TimeZone shift:"); GP.NUMBER("clock_tz", "", clock_tz););
     GP_MAKE_BOX(GP.LABEL("Volume:"); GP.SLIDER("clock_volume", volume, 0, MAX_VOLUME););
-    GP_MAKE_BOX(GP.LABEL("12/24 mode"); GP.SWITCH("clock_12", clock_12 ? true: false););
-    GP_MAKE_BOX(GP.LABEL("Leading 0"); GP.SWITCH("clock_leading_0", clock_leading_0 ? true: false, 0););
     GP_MAKE_BOX(GP.LABEL("Bar mode"); GP.SELECT("clock_bar_mode", "Always off, Async, Sync, Always on", clock_bar_mode););
     GP_MAKE_BOX(GP.LABEL("Use RDS"); GP.SWITCH("clock_use_rds", clock_use_rds ? true: false, 0););
     GP_MAKE_BOX(GP.LABEL("Use NTP"); GP.SWITCH("clock_use_ntp", clock_use_ntp ? true: false););
-    GP_MAKE_BOX(GP.LABEL("Use RTC"); GP.SWITCH("clock_use_rtc", clock_use_rtc ? true: false, 0););
+    GP_MAKE_BOX(GP.LABEL("Show weekday"); GP.SWITCH("clock_show_weekday", clock_show_weekday ? true: false, 0););
     GP_MAKE_BOX(GP.LABEL("Channel"); GP.SLIDER("channel", channel, 9400, 10800););
     GP_MAKE_BOX(GP.LABEL("NTP Server name: "); GP.TEXT("clock_ntp_server", "local NTP server if you have", ntpServerName, "", sizeof(ntpServerName)-1););
   );
@@ -449,16 +439,6 @@ void action(GyverPortal& p)
       volume = n;
     }
 
-    n = ui.getBool("clock_12");
-    if (n>=0 && n<=1) {
-      clock_12 = n;
-    }
-
-    n = ui.getBool("clock_leading_0");
-    if (n>=0 && n<=1) {
-      clock_leading_0 = n;
-    }
-
     n = ui.getInt("clock_bar_mode");
     if (n>=0 && n<4) {
       clock_bar_mode = n;
@@ -472,11 +452,6 @@ void action(GyverPortal& p)
     n = ui.getBool("clock_use_ntp");
     if (n>=0 && n<=1) {
       clock_use_ntp = n;
-    }
-
-    n = ui.getBool("clock_use_rtc");
-    if (n>=0 && n<=1) {
-      clock_use_rtc = n;
     }
 
     String s = ui.getString("clock_ntp_server");
@@ -523,51 +498,73 @@ void init_spi()
 
 // Bitmaps for the characters
 const int digit_table[] = {
-   //987G432AC1F.56EDB
-   0b00010001101000101, // 0                 //   AAAA
-   0b00000000101000000, // 1                 //  B    C
-   0b00010001100000110, // 2                 //  B    C
-   0b00010001101000010, // 3                 //   DDDD
-   0b00000000101000011, // 4                 //  E    F
-   0b00010001001000011, // 5                 //  E    F
-   0b00010001001000111, // 6                 //   GGGG  DP
-   0b00000001101000000, // 7
-   0b00010001101000111, // 8
-   0b00010001101000011, // 9
-   0b00000000000000000, 
-   0b00000000000000010, // -
+   //TGWXX57AC8:BDF42E                                    T
+   0b01000001100101001, // 0                 //   AAAA
+   0b00000000100001000, // 1                 //  B    C
+   0b01000001100010001, // 2                 //  B    C
+   0b01000001100011000, // 3                 //   DDDD
+   0b00000000100111000, // 4                 //  E    F
+   0b01000001000111000, // 5                 //  E    F
+   0b01000001000111001, // 6                 //   GGGG
+   0b00000001100001000, // 7
+   0b01000001100111001, // 8                 Mon=A Tue=:
+   0b01000001100111000, // 9                 Wed=B Thu=C
+   0b00000000000000000, //                   Fri=F Sat=D
+   0b00000000000010000, // -                 Sun=G BOX=E  
 };
 
-// Character position bits.
-const int position_table[] = {
-   //987G432AC1F.56EDB
-   0b01000000000000000,
-   0b00100000000000000,
+const int weekday_table[] = {
+   //TGWXX57AC8:BDF42E                                    T
+   0b00000001000000000,
+   0b10000000000000000,
+   0b00000000000100000,
+   0b00000000100000000,
    0b00000000000001000,
    0b00000000000010000,
-   0b00001000000000000,
+   0b01000000000000000,
+   0b00000000000000001
+};
+// Character position bits.
+const int position_table[] = {
+   //TGWXX57AC8:BDF42E
+   0b00000000000000000,
+   0b00000000000000010,
+   0b00000000000000000,
+   0b00000000000000100,
    0b00000100000000000,
+   0b00000000001000000,
    0b00000010000000000,
    0b00000000010000000,
-   0b10000000000000000,
+   0b00000000000000000,
 };
 
 const int dot =
-  //987G432AC1F.56EDB;
-  0b00000000000100000;
+  //TGWXX57AC8:BDF42E
+  0b10000000000000000;
 
 // Show the contents of disp_text in the display, digit by digit. 
 void show_display(int i)
 {
   // Compose bits to be sent to MAX6921 to show one digit at one position.
   unsigned int bits = position_table[i];  // Set the digit positon bit
-  if (disp_text[i] == '-') {
+  if (i==1) {
+    bits |= digit_table[disp_text[i]-'0'];
+    if (disp_text[0]=='1') {
+      bits |= dot;
+    }
+  } else if (i==5) {
+    // : position.
+    if (disp_text[i]==':') {
+      bits |= dot;
+    }
+  } else if (disp_text[i] == '-') {
     bits |= digit_table[11];
   } else if (disp_text[i]>='0' && disp_text[i]<='9') {
     bits |= digit_table[disp_text[i]-'0'];  // Set the digit bits
   }
-  bits |= dots[i] ? dot : 0;  // Set the dot bit
   send_spi_data(bits<<12); // Lowest 11 bits are not used in MAX6921 driver
+  delayMicroseconds(1000);
+  send_spi_data(0);
 }
 
 // Send data to MAX6921 via SPI.
