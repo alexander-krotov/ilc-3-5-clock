@@ -46,14 +46,13 @@ int channel = 9440;  // Radio chanel
 int volume = 15; // Radio volume
 char rdsBuffer[16];
 
-// Display data: digits and dots.
-char disp_text[]="0123456789";
-
 // NTP update interval in seconds
 const int NTP_UPDATE_INTERVAL=3000;
 
+// Display data: digits and dots.
+int disp_bits[8];
 // Our fake TZ
-const struct timezone tz = {0, 0};
+struct timezone tz = {0, 0};
 
 // Clock global configuration.
 char ntpServerName[80] = "fi.pool.ntp.org";
@@ -81,6 +80,7 @@ void read_eeprom_data()
   volume = EEPROM.read(eeprom_addr+1);
   clock_bar_mode = EEPROM.read(eeprom_addr+4);
   clock_use_ntp = EEPROM.read(eeprom_addr+5);
+  clock_show_weekday = EEPROM.read(eeprom_addr+6);
   clock_use_rds = EEPROM.read(eeprom_addr+7);
   channel = EEPROM.readInt(eeprom_addr+8);
   EEPROM.readString(eeprom_addr+12, ntpServerName, sizeof(ntpServerName)-1);
@@ -92,11 +92,9 @@ void write_eeprom_data()
 {
   EEPROM.write(eeprom_addr, clock_tz);
   EEPROM.write(eeprom_addr+1, volume);
-  // EEPROM.write(eeprom_addr+2, clock_12);
-  // EEPROM.write(eeprom_addr+3, clock_leading_0);
   EEPROM.write(eeprom_addr+4, clock_bar_mode);
   EEPROM.write(eeprom_addr+5, clock_use_ntp);
-  // EEPROM.write(eeprom_addr+6, clock_use_rtc);
+  EEPROM.write(eeprom_addr+6, clock_show_weekday);
   EEPROM.write(eeprom_addr+7, clock_use_rds);
   EEPROM.writeInt(eeprom_addr+8, channel);
   EEPROM.writeString(eeprom_addr+12, ntpServerName);
@@ -125,8 +123,14 @@ void set_clock_time(unsigned int h, unsigned int m, unsigned int s)
 
   // Check time sanity. Uninitialized RTC might give strange values.
   if (h<24 && m<60 && s<60) {
+    // Get current time.
     struct timeval tv = {0};
-    tv.tv_sec = h*60*60+m*60+s;
+    gettimeofday(&tv, &tz);
+    // Clean hours minutes and seconds, preserving day month and year.
+    unsigned long sec_in_day = tv.tv_sec%(60*60*24);
+    tv.tv_sec -= sec_in_day;
+    // Set hours minutes and seconds from the pareameters.
+    tv.tv_sec += h*60*60+m*60+s;
     // Set current time
     settimeofday(&tv, &tz);
   }
@@ -149,6 +153,14 @@ void get_time_from_rtc()
   }
 }
 
+// Interrupt function to updae the display with current time.
+void IRAM_ATTR Timer0_ISR()
+{
+  char disp_text[8];
+  set_time_to_display(disp_text);
+  update_display(disp_text);
+}
+
 void setup()
 {
   // Serial.begin(115200);
@@ -166,6 +178,7 @@ void setup()
   }
 
   if (initialize_network()) {
+    // Show the clock IP address
     IPAddress myIP = WiFi.localIP();
     String ip_addr_str = myIP.toString();
     log_printf("AP IP address: %s\n", ip_addr_str.c_str());
@@ -183,12 +196,22 @@ void setup()
   }
   // init_radio();
 
+  // Set the timer to update the display 4 times/sec.
+  static hw_timer_t * Timer0_Cfg = timerBegin(1000);
+  if (Timer0_Cfg) {
+    log_printf("Timer setup\n");
+    timerAttachInterrupt(Timer0_Cfg, &Timer0_ISR);
+    timerAlarm(Timer0_Cfg, 250, true, 0);
+  }
+
   log_printf("setup done\n");
 }
 
+// Run a string on the display.
+// We use it to run the clock assigned IP address.
 void run_string_on_display(const char *str)
 {
-    int display[6];
+    char disp_text[8];
     int len = strlen(str);
 
     log_printf("run_string_on_display: str=%s len=%d\n", str, len);
@@ -196,12 +219,14 @@ void run_string_on_display(const char *str)
     for (int s=-8; s<=len; s++) {
       for (int i=0; i<8; i++) {
         if (i+s>=0 && i+s<len && str[i+s]>='0' && str[i+s]<='9') {
-          // character fitst to the display and it is betweern 0 and 9.
+          // character fits to the display and it is betweern 0 and 9.
           disp_text[i] = str[i+s];
         } else {
           disp_text[i] = ' ';
         }
       }
+
+      update_display(disp_text);
 
       unsigned long end_time = millis()+200;
       for (int i=0; millis()<end_time; i++) {
@@ -242,12 +267,16 @@ time_t getNtpTime()
 
       log_printf("Receive NTP Response %lu\n", (unsigned long)secsSince1900);
 
-      tm *ttm = localtime(&secsSince1900);
-      myRTC.setSecond(ttm->tm_sec);
-      myRTC.setMinute(ttm->tm_min);
-      myRTC.setHour(ttm->tm_hour);
-
-      set_clock_time(ttm->tm_hour, ttm->tm_min, ttm->tm_sec);
+      if (clock_use_rtc) {
+        tm *ttm = localtime(&secsSince1900);
+        myRTC.setSecond(ttm->tm_sec);
+        myRTC.setMinute(ttm->tm_min);
+        myRTC.setHour(ttm->tm_hour);
+      }
+      
+      struct timeval tv = { .tv_sec = secsSince1900, .tv_usec = 0 };
+      // Set current time
+      settimeofday(&tv, &tz);
 
       return secsSince1900;
     }
@@ -285,64 +314,19 @@ void loop()
   // same time share.
   static unsigned int i=0;
 
-  if (i%16 == 0) {
-    int h, m, s;
-    if (clock_use_rtc && i%(1024*1024) == 0) {
-        get_time_from_rtc();
-    }
-
-    struct timeval tv;
-    struct timezone tz = {0};
-    // Read the current time
-    gettimeofday(&tv, &tz);
-    struct tm *ttm = localtime(&tv.tv_sec);
-
-    s = ttm->tm_sec;
-    m = ttm->tm_min;
-    h = ttm->tm_hour;
-
-    if (h>12) {
-      h-=12;
-    }
-
-    // log_printf("Chip time %02d:%02d:%02d\n", h, m, s);
-
-    if (h>=10) {   
-      disp_text[0] = '1';
-    } else {
-      disp_text[0] = ' ';
-    }
-    disp_text[1] = h%10+'0';
-    
-    disp_text[3] = m/10+'0';
-    disp_text[4] = m%10+'0';
-    
-    disp_text[6] = s/10+'0';
-    disp_text[7] = s%10+'0';
-
-    if (clock_bar_mode == 0) {
-      disp_text[2] = ' ';
-      disp_text[5] = ' ';
-    } else if (clock_bar_mode==3) {
-      disp_text[2] = '-';
-      disp_text[5] = '-';      
-    } else if (tv.tv_usec >= 500000) {
-      disp_text[2] = '-';
-      disp_text[5] = (clock_bar_mode==2) ? '-': ' ';
-    } else {
-      disp_text[2] = ' ';
-      disp_text[5] = (clock_bar_mode==2) ? ' ': '-';
-    }
+  if (clock_use_rtc && i%(1024*1024) == 0) {
+    get_time_from_rtc();
   }
 
-  show_display(1+i%7);
+  // Show the next digit.
+  show_display(i%8);
   i++;
   // loop_radio();
 
   // Web UI tick.
-  // if (i%15==0) {
-  //   ui.tick();
-  // }
+  if (i%155==0) {
+     ui.tick();
+  }
 }
 
 // ========================================================================================
@@ -369,6 +353,7 @@ void loop_radio()
   log_printf("\n", rdsBuffer);
 }
 
+// Show the web UI form.
 void build()
 {
   log_printf("BUILD\n");
@@ -398,10 +383,6 @@ void build()
 
   time_t t = time(NULL);
   tm *ttm = localtime(&t);
-  myRTC.setSecond(ttm->tm_sec);
-  myRTC.setMinute(ttm->tm_min);
-  myRTC.setHour(ttm->tm_hour);
-
   GPtime gptime (ttm->tm_hour, ttm->tm_min, ttm->tm_sec);
 
   GP_MAKE_BLOCK_TAB(
@@ -454,6 +435,11 @@ void action(GyverPortal& p)
       clock_use_ntp = n;
     }
 
+    n = ui.getBool("clock_show_weekday");
+    if (n>=0 && n<=1) {
+      clock_show_weekday = n;
+    }
+
     String s = ui.getString("clock_ntp_server");
     if (s && strcmp(s.c_str(), ntpServerName) != 0) {
       strncpy(ntpServerName, s.c_str(), sizeof(ntpServerName)-1);
@@ -475,10 +461,12 @@ void action(GyverPortal& p)
     GPtime gptime = ui.getTime("time");
     log_printf("Action Settime: %d:%02d:%02d\n", gptime.hour, gptime.minute, gptime.second);
 
-    // Set time to RPC
-    myRTC.setSecond(gptime.hour);
-    myRTC.setMinute(gptime.minute);
-    myRTC.setHour(gptime.second);
+    if (clock_use_rtc) {
+      // Set time to RPC
+      myRTC.setSecond(gptime.hour);
+      myRTC.setMinute(gptime.minute);
+      myRTC.setHour(gptime.second);
+    }
 
     set_clock_time(gptime.hour, gptime.minute, gptime.second);
   }
@@ -513,8 +501,9 @@ const int digit_table[] = {
    0b00000000000010000, // -                 Sun=G BOX=E  
 };
 
+// Bits to set for weekday display (at position 2)
 const int weekday_table[] = {
-   //TGWXX57AC8:BDF42E                                    T
+   //TGWXX57AC8:BDF42E
    0b00000001000000000,
    0b10000000000000000,
    0b00000000000100000,
@@ -524,6 +513,7 @@ const int weekday_table[] = {
    0b01000000000000000,
    0b00000000000000001
 };
+
 // Character position bits.
 const int position_table[] = {
    //TGWXX57AC8:BDF42E
@@ -542,29 +532,121 @@ const int dot =
   //TGWXX57AC8:BDF42E
   0b10000000000000000;
 
-// Show the contents of disp_text in the display, digit by digit. 
-void show_display(int i)
+// Calculate a bitmask for MAX6921 driver to show ith digit of disp_text. 
+int show_bits(int i, const char *disp_text)
 {
   // Compose bits to be sent to MAX6921 to show one digit at one position.
-  unsigned int bits = position_table[i];  // Set the digit positon bit
-  if (i==1) {
-    bits |= digit_table[disp_text[i]-'0'];
-    if (disp_text[0]=='1') {
-      bits |= dot;
-    }
-  } else if (i==5) {
+  unsigned int bits = 0;
+
+  switch (i) {
+  case 0:
+    break;
+  case 2: // Weekday
+    break;
+  case 5:
     // : position.
     if (disp_text[i]==':') {
-      bits |= dot;
+      bits = dot;
     }
-  } else if (disp_text[i] == '-') {
-    bits |= digit_table[11];
-  } else if (disp_text[i]>='0' && disp_text[i]<='9') {
-    bits |= digit_table[disp_text[i]-'0'];  // Set the digit bits
+    break;
+  case 1:
+    if (disp_text[0]=='1') {
+      bits = dot;
+    }
+  default:
+    if (disp_text[i] == '-') {
+      bits |= digit_table[11];
+    } else if (disp_text[i]>='0' && disp_text[i]<='9') {
+      bits |= digit_table[disp_text[i]-'0'];  // Set the digit bits
+    }
+    break;
   }
-  send_spi_data(bits<<12); // Lowest 11 bits are not used in MAX6921 driver
-  delayMicroseconds(1000);
-  send_spi_data(0);
+  if (bits!=0 ) {
+    bits |= position_table[i];  // Set the digit positon bit
+  }
+  return bits;
+}
+
+// Set the display data for ith digit, send it to MAX driver and delay
+// for some time to let the digit show.
+void show_display(int i)
+{
+  int bits = disp_bits[i];
+  // If all the bits are blank - there is nothing to display and we
+  // do not need to delay here.
+  if (bits) {
+    send_spi_data(bits<<12); // Lowest 11 bits are not used in MAX6921 driver
+    delayMicroseconds(50);
+  }
+}
+
+// Set the display data for 8 display digits.
+// Every digit needs a bitmask derived from the disp_text character.
+void update_display(const char *disp_text)
+{
+  for (int i=0; i<8; i++) {
+    disp_bits[i] = show_bits(i+1, disp_text);
+  }
+}
+
+// Get the system time and set it to to disp_test as text.
+void set_time_to_display(char *disp_text)
+{
+    struct timeval tv;
+    // Read the current time
+    gettimeofday(&tv, &tz);
+
+    int s = tv.tv_sec;
+    int m = tv.tv_sec/60;
+    int h = tv.tv_sec/(60*60);
+
+    // Set hours. ILC display could only show 1 as the first digit.
+    // So it is ether blank or 1, and our clock is always 12h mode.
+    h %= 12;
+    if (h==0) {
+      h = 12;
+    }
+
+    // Calculate minutes and seconds.
+    m %= 60;
+    s %= 60;
+    // log_printf("Chip time %02d:%02d:%02d\n", h, m, s);
+
+    // Print hours
+    if (h>=10) {   
+      disp_text[0] = '1';
+    } else {
+      disp_text[0] = ' ';
+    }
+    disp_text[1] = h%10+'0';
+    
+    // Print minutes
+    disp_text[3] = m/10+'0';
+    disp_text[4] = m%10+'0';
+    
+    // Print seconds
+    disp_text[6] = s/10+'0';
+    disp_text[7] = s%10+'0';
+
+    // Show the : bar
+    if (clock_bar_mode == 0) {
+      disp_text[5] = ' ';
+    } else if (clock_bar_mode==3) {
+      disp_text[5] = ':';      
+    } else if (tv.tv_usec >= 500000) {
+      disp_text[5] = (clock_bar_mode==2) ? ':': ' ';
+    } else {
+      disp_text[5] = (clock_bar_mode==2) ? ' ': ':';
+    }
+
+    // Show weekaday
+    if (clock_show_weekday) {
+      time_t rawtime = tv.tv_sec;
+      tm *timeinfo = localtime(&rawtime);
+      disp_text[2] = weekday_table[timeinfo->tm_wday];
+    } else {
+      disp_text[2] = ' ';
+    }
 }
 
 // Send data to MAX6921 via SPI.
