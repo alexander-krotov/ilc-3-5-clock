@@ -1,11 +1,11 @@
 # ILC-3-5-clock
 Digital clock with soviet-made ILC-3-5 (ИЛЦ-3-5/7 in Russian) VFD indicator.
-  
+
 Clock is driven by ESP32 C3 Super mini, MAX6921 is used to drive VFD. Indicator I got is Soviet-made IV-28 produced in December 1988.
 
-![clock text](https://github.com/alexander-krotov/IV28-clock/blob/main/clock.jpg?raw=true)
+![clock text](https://github.com/alexander-krotov/ilc-3-5-clock/blob/main/clock.jpg?raw=true)
 
-Clock video: https://youtu.be/NhdLMzuFE0I
+Clock video: https://youtu.be/FuqtN22KMOQ
 
 ## Setup instructions
 Easy setup instructions are very similar to: https://github.com/alexander-krotov/apollo-clock/blob/main/setup.md
@@ -13,15 +13,6 @@ Easy setup instructions are very similar to: https://github.com/alexander-krotov
 ## Software
 
 Clock firmware is derived from a previous clock formware I did for IV-28 clock https://github.com/alexander-krotov/IV28-clock
-Also it provides controls for Si4703 RDS module.
-
-Firmware uses NetworkManager for WiFi configuration, Web UI is based on GyverPortal library.
-
-If connected to WiFi, the clock uses NTP to get the time.
-
-References to software components:
-- WiFi Manager https://github.com/tzapu/WiFiManager
-- GyverPortal https://github.com/GyverLibs/GyverPortal
 
 ## Hardware
 
@@ -32,13 +23,7 @@ The only difference is R1 resisor. The indicator sinks 100mA cathode current and
 
 https://oshwlab.com/alexander.krotov/iv-18-clock_copy_copy
 
-Clock is powered from USB 5v power supply, it could be provided via ESP32 module connector. It eats about XXXmA, peaking to XXXmA.
-
-ILC-3-5 VFD display needs 24v power supply. It is provided by a charge pump implemented in hardware.
-
-DS3231 is used as a backup Real-Time clock (RTC).
-
-Clock has a connector H5 for Si4703 rado module, which could be used as a time provider, but it did not work for me.
+Clock is powered from USB 5v power supply, it could be provided via ESP32 module connector. It eats about 150mA, peaking to 200mA.
 
 Driver pins to VFD connection table:
 
