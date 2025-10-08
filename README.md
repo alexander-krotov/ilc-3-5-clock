@@ -1,7 +1,7 @@
 # ILC-3-5-clock
 Digital clock with soviet-made ILC-3-5 (ИЛЦ-3-5/7 in Russian) VFD indicator.
 
-Clock is driven by ESP32 C3 Super mini, MAX6921 is used to drive VFD. Indicator I got is Soviet-made IV-28 produced in December 1988.
+Clock is driven by ESP32 C3 Super mini, MAX6921 is used to drive VFD. Indicator I got is Soviet-made VFD produced in November 1989.
 
 ![clock text](https://github.com/alexander-krotov/ilc-3-5-clock/blob/main/clock.jpg?raw=true)
 
