@@ -65,6 +65,7 @@ unsigned char clock_use_ntp = true; // Enable NTP synchronization
 unsigned char clock_use_rtc = true; // Enable RTC synchronization
 unsigned char clock_use_rds = true; // Enable RDS (FM radio text)unsigned char clock_show_weekday = true;
 unsigned char clock_show_weekday;
+unsigned char clock_show_sec = true;
 
 // --- EEPROM Configuration Storage ---
 const int eeprom_addr = 12;         // EEPROM base address for config
@@ -89,6 +90,7 @@ void read_eeprom_data()
   clock_use_rds = EEPROM.read(eeprom_addr+7);
   channel = EEPROM.readInt(eeprom_addr+8);
   clock_show_weekday = EEPROM.read(eeprom_addr+9);
+  clock_show_sec = EEPROM.read(eeprom_addr+10);
   EEPROM.readString(eeprom_addr+12, ntpServerName, sizeof(ntpServerName)-1);
   EEPROM.commit();
 }
@@ -107,6 +109,7 @@ void write_eeprom_data()
   EEPROM.write(eeprom_addr+7, clock_use_rds);
   EEPROM.writeInt(eeprom_addr+8, channel);
   EEPROM.write(eeprom_addr+9, clock_show_weekday);
+  EEPROM.write(eeprom_addr+10,clock_show_sec);
   EEPROM.writeString(eeprom_addr+12, ntpServerName);
   EEPROM.commit();
 }
@@ -189,10 +192,15 @@ void IRAM_ATTR Timer0_ISR()
   disp_text[4] = m%10+'0';
     
   // Print seconds
-  disp_text[6] = s/10+'0';
-  disp_text[7] = s%10+'0';
-  disp_text[8] = 0;
-
+  if (clock_show_sec) {
+    disp_text[6] = s/10+'0';
+    disp_text[7] = s%10+'0';
+    disp_text[8] = 0;
+  } else {
+    disp_text[6] = 0;
+    disp_text[7] = 0;
+    disp_text[8] = 0;
+  }
   // Show the : bar
   if (clock_bar_mode == 0) {
     disp_text[5] = ' ';
@@ -296,6 +304,9 @@ void run_string_on_display(const char *str)
     for (int i=0; millis()<end_time; i++) {     
       // Update display digits
       for (int j = 0; j < 8; j++) {
+        if (j>=6 && !clock_show_sec) {
+          break;
+        }
         if (digit_bits[j]) {
           send_spi_data(digit_bits[j] << 12); // Lowest 11 bits are not used in MAX6921 driver
           delayMicroseconds(500);
@@ -436,6 +447,7 @@ void build()
     GP_MAKE_BOX(GP.LABEL("Use RDS"); GP.SWITCH("clock_use_rds", clock_use_rds ? true: false, 0););
     GP_MAKE_BOX(GP.LABEL("Use NTP"); GP.SWITCH("clock_use_ntp", clock_use_ntp ? true: false););
     GP_MAKE_BOX(GP.LABEL("Show weekday"); GP.SWITCH("clock_show_weekday", clock_show_weekday ? true: false, 0););
+    GP_MAKE_BOX(GP.LABEL("Show seconds"); GP.SWITCH("clock_show_sec", clock_show_sec ? true: false, 0););
     GP_MAKE_BOX(GP.LABEL("Channel"); GP.SLIDER("channel", channel, 9400, 10800););
     GP_MAKE_BOX(GP.LABEL("NTP Server name: "); GP.TEXT("clock_ntp_server", "local NTP server if you have", ntpServerName, "", sizeof(ntpServerName)-1););
   );
@@ -506,6 +518,11 @@ void action(GyverPortal& p)
     n = ui.getBool("clock_show_weekday");
     if (n>=0 && n<=1) {
       clock_show_weekday = n;
+    }
+
+    n = ui.getBool("clock_show_sec");
+    if (n>=0 && n<=1) {
+      clock_show_sec = n;
     }
 
     String s = ui.getString("clock_ntp_server");
