@@ -19,6 +19,7 @@
 #include <EEPROM.h>      // Persistent storage
 #include <GyverPortal.h> // Web UI
 #include <WiFiUdp.h>     // UDP networking
+#include <SPI.h>         // SPI to interface with MAX6921
 
 // --- Hardware pin assignments ---
 // SI4703 (FM radio) pins
@@ -49,7 +50,8 @@ int volume = 15;                // Default radio volume
 char rdsBuffer[16];             // Buffer for RDS data
 
 // Display state: digits and decimal points
-int digit_bits[9];              // Encoded SPI data for each digit
+const int display_size = 9;
+int digit_bits[display_size];              // Encoded SPI data for each digit
 
 // --- NTP Related ---
 const int NTP_UPDATE_INTERVAL = 3000; // NTP sync interval (seconds)
@@ -75,6 +77,10 @@ const int WIFI_MANAGER_TIMEOUT = 60; // Portal timeout (seconds)
 
 // --- Web Interface ---
 GyverPortal ui;
+
+// Global variable for the display task handle
+TaskHandle_t displayTaskHandle;
+void show_display_string_task(void *parameter);
 
 // --- EEPROM Read/Write ---
 void read_eeprom_data()
@@ -153,7 +159,6 @@ void get_time_from_rtc()
   set_clock_time(h, m, s);
 }
 
-
 // Updates display state with current time, called by hardware timer
 void IRAM_ATTR Timer0_ISR()
 {
@@ -180,17 +185,17 @@ void IRAM_ATTR Timer0_ISR()
   }
 
   // Print hours
-  if (h>=10) {   
+  if (h>=10) {
     disp_text[0] = '1';
   } else {
     disp_text[0] = ' ';
   }
   disp_text[1] = h%10+'0';
-  
+
   // Print minutes
   disp_text[3] = m/10+'0';
   disp_text[4] = m%10+'0';
-    
+
   // Print seconds
   if (clock_show_sec) {
     disp_text[6] = s/10+'0';
@@ -205,7 +210,7 @@ void IRAM_ATTR Timer0_ISR()
   if (clock_bar_mode == 0) {
     disp_text[5] = ' ';
   } else if (clock_bar_mode==3) {
-    disp_text[5] = ':';      
+    disp_text[5] = ':';
   } else if (tv.tv_usec >= 500000) {
     disp_text[5] = (clock_bar_mode==2) ? ':': ' ';
   } else {
@@ -223,7 +228,7 @@ void IRAM_ATTR Timer0_ISR()
   }
 #endif
 
-  for (int i=0; i<9; i++) {
+  for (int i=0; i<display_size; i++) {
     digit_bits[i] = show_bits(i+1, disp_text);
   }
 }
@@ -245,6 +250,9 @@ void setup()
   if (clock_use_rtc) {
     get_time_from_rtc();
   }
+
+  // Create FreeRTOS task for showing display string
+  xTaskCreate(show_display_string_task, "DisplayTask", 2048, NULL, 1, &displayTaskHandle);
 
   // Start network and UI if WiFi is available
   if (initialize_network()) {
@@ -281,13 +289,13 @@ void setup()
 // We use it to run the clock assigned IP address.
 void run_string_on_display(const char *str)
 {
-  char disp_text[9];
+  char disp_text[display_size];
   int len = strlen(str);
 
   log_printf("run_string_on_display: str=%s len=%d\n", str, len);
 
-  for (int s=-8; s<=len; s++) {
-    for (int i=0; i<8; i++) {
+  for (int s=-display_size; s<=len; s++) {
+    for (int i=0; i<display_size; i++) {
       if (i+s>=0 && i+s<len && str[i+s]>='0' && str[i+s]<='9') {
         // character fits to the display and it is betweern 0 and 9.
         disp_text[i] = str[i+s];
@@ -296,23 +304,12 @@ void run_string_on_display(const char *str)
       }
     }
 
-    for (int i=0; i<9; i++) {
+    for (int i=0; i<display_size; i++) {
       digit_bits[i] = show_bits(i+1, disp_text);
     }
 
-    unsigned long end_time = millis()+200;
-    for (int i=0; millis()<end_time; i++) {     
-      // Update display digits
-      for (int j = 0; j < 8; j++) {
-        if (j>=6 && !clock_show_sec) {
-          break;
-        }
-        if (digit_bits[j]) {
-          send_spi_data(digit_bits[j] << 12); // Lowest 11 bits are not used in MAX6921 driver
-          delayMicroseconds(500);
-        }
-      }
-    }
+    // Scroll the strings on display with 5 char/sec speed.
+    delay(200);
   }
 }
 
@@ -384,23 +381,13 @@ void loop()
   // Refresh UI and periodically sync time
   static unsigned int i = 0;
   if (i % 128 == 0) {
-    ui.tick();
-
     // RTC sync (very infrequent)
     if (clock_use_rtc && i % (1024*1024) == 0) {
         get_time_from_rtc();
     }
   }
   i++;
-
-  // Update display digits
-  for (int j = 0; j < 8; j++) {
-    if (digit_bits[j]) {
-      send_spi_data(digit_bits[j] << 12); // Lowest 11 bits are not used in MAX6921 driver
-      delay(1);
-    }
-  }
-
+  ui.tick();
   // loop_radio(); // Uncomment to enable radio loop
 }
 
@@ -569,6 +556,12 @@ void init_spi()
 
   digitalWrite(MAX_LOAD, LOW);
   digitalWrite(MAX_BLANK, LOW);
+
+  // Configure SPI pins
+  SPI.begin(MAX_CLK, -1, MAX_DIN);  // CLK, MISO, MOSI, CS
+  SPI.setFrequency(5000000);  // 5 MHz frequency
+  SPI.setDataMode(SPI_MODE0);  // CPOL=0, CPHA=0
+  SPI.setBitOrder(LSBFIRST);  // Least Significant Bit first
 }
 
 // Bitmaps for the characters
@@ -585,7 +578,7 @@ const int digit_table[] = {
    0b01000001100111001, // 8                 Mon=A Tue=:
    0b01000001100111000, // 9                 Wed=B Thu=C
    0b00000000000000000, //                   Fri=F Sat=D
-   0b00000000000010000, // -                 Sun=G BOX=E  
+   0b00000000000010000, // -                 Sun=G BOX=E
 };
 
 // Bits to set for weekday display (at position 2)
@@ -619,7 +612,7 @@ const int dot =
   //TGWXX57AC8:BDF42E
   0b10000000000000000;
 
-// Calculate a bitmask for MAX6921 driver to show ith digit of disp_text. 
+// Calculate a bitmask for MAX6921 driver to show ith digit of disp_text.
 int show_bits(int i, const char *disp_text)
 {
   // Compose bits to be sent to MAX6921 to show one digit at one position.
@@ -654,80 +647,39 @@ int show_bits(int i, const char *disp_text)
   return bits;
 }
 
-// Get the system time and set it to to disp_test as text.
-void set_time_to_display(char *disp_text)
-{
-    struct timeval tv;
-    // Read the current time
-    gettimeofday(&tv, &tz);
-
-    int s = tv.tv_sec;
-    int m = tv.tv_sec/60;
-    int h = tv.tv_sec/(60*60);
-
-    // Set hours. ILC display could only show 1 as the first digit.
-    // So it is ether blank or 1, and our clock is always 12h mode.
-    h %= 12;
-    if (h==0) {
-      h = 12;
-    }
-
-    // Calculate minutes and seconds.
-    m %= 60;
-    s %= 60;
-    // log_printf("Chip time %02d:%02d:%02d\n", h, m, s);
-
-    // Print hours
-    if (h>=10) {   
-      disp_text[0] = '1';
-    } else {
-      disp_text[0] = ' ';
-    }
-    disp_text[1] = h%10+'0';
-    
-    // Print minutes
-    disp_text[3] = m/10+'0';
-    disp_text[4] = m%10+'0';
-    
-    // Print seconds
-    disp_text[6] = s/10+'0';
-    disp_text[7] = s%10+'0';
-    disp_text[8] = 0;
-
-    // Show the : bar
-    if (clock_bar_mode == 0) {
-      disp_text[5] = ' ';
-    } else if (clock_bar_mode==3) {
-      disp_text[5] = ':';      
-    } else if (tv.tv_usec >= 500000) {
-      disp_text[5] = (clock_bar_mode==2) ? ':': ' ';
-    } else {
-      disp_text[5] = (clock_bar_mode==2) ? ' ': ':';
-    }
-
-    // Show weekaday
-    if (0 && clock_show_weekday) {
-      time_t rawtime = tv.tv_sec;
-      tm *timeinfo = localtime(&rawtime);
-      disp_text[2] = weekday_table[timeinfo->tm_wday];
-    } else {
-      disp_text[2] = ' ';
-    }
-}
-
 // --- SPI Data Transmission ---
 // Send 32 bits to MAX6921
 void send_spi_data(unsigned int spi_data)
 {
-    digitalWrite(MAX_BLANK, HIGH);
+  digitalWrite(MAX_LOAD, LOW);
 
-    digitalWrite(MAX_LOAD, LOW);
-    for (int i = 0; i < 32; i++) {
-        digitalWrite(MAX_CLK, LOW);
-        int bit = (spi_data >> i) & 1;
-        digitalWrite(MAX_DIN, bit);
-        digitalWrite(MAX_CLK, HIGH);
+  // Send data as 4 bytes (32 bits)
+  SPI.write32(spi_data);
+
+  digitalWrite(MAX_LOAD, HIGH);
+  digitalWrite(MAX_BLANK, LOW);
+}
+
+void show_display_string_task(void *parameter)
+{
+  // Turn on the display
+  digitalWrite(MAX_BLANK, LOW);
+
+  // Loop through the display digits
+  for (int i=0; ; i++) {
+    // In this infinite loop we get back to the first digit.
+    if (i == display_size) {
+      i = 0;
     }
-    digitalWrite(MAX_LOAD, HIGH);
-    digitalWrite(MAX_BLANK, LOW);
+
+    if (digit_bits[i] == 0) {
+      // No need to display this digit - it is all black.
+      continue;
+    }
+    send_spi_data(digit_bits[i] << 12); // Lowest 11 bits are not used in MAX6921 driver
+
+    // 2ms is sort of magic value: less - and the digits are dimmed,
+    // more - and it starts to flicker.
+    vTaskDelay(pdMS_TO_TICKS(2)); // Adjust the delay as necessary
+  }
 }
