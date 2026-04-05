@@ -60,14 +60,14 @@ struct timezone tz = {0, 0};    // Timezone placeholder
 // --- Clock Configuration ---
 char ntpServerName[80] = "fi.pool.ntp.org"; // NTP server address
 signed char clock_tz = 2;           // Timezone offset (hours)
-unsigned char clock_12 = 0;         // 12h format flag (0 = 24h, 1 = 12h)
+unsigned char clock_12 = true;      // 12h format flag. ILC-3-5 cannot show 24h format.
 unsigned char clock_leading_0;      // Display leading zero on hours
 unsigned char clock_bar_mode = 0;   // Separator/bar display mode
 unsigned char clock_use_ntp = true; // Enable NTP synchronization
 unsigned char clock_use_rtc = true; // Enable RTC synchronization
 unsigned char clock_use_rds = true; // Enable RDS (FM radio text)unsigned char clock_show_weekday = true;
-unsigned char clock_show_weekday;
-unsigned char clock_show_sec = true;
+unsigned char clock_show_weekday;   // Show the weekday on a display
+unsigned char clock_show_sec;       // Show the running seconds.
 
 // --- EEPROM Configuration Storage ---
 const int eeprom_addr = 12;         // EEPROM base address for config
@@ -88,7 +88,6 @@ void read_eeprom_data()
   // Restore configuration from EEPROM
   clock_tz = (signed char)EEPROM.read(eeprom_addr);
   volume = EEPROM.read(eeprom_addr+1);
-  clock_12 = EEPROM.read(eeprom_addr+2);
   clock_leading_0 = EEPROM.read(eeprom_addr+3);
   clock_bar_mode = EEPROM.read(eeprom_addr+4);
   clock_use_ntp = EEPROM.read(eeprom_addr+5);
@@ -107,7 +106,6 @@ void write_eeprom_data()
   // Save current configuration to EEPROM
   EEPROM.write(eeprom_addr, clock_tz);
   EEPROM.write(eeprom_addr+1, volume);
-  EEPROM.write(eeprom_addr+2, clock_12);
   EEPROM.write(eeprom_addr+3, clock_leading_0);
   EEPROM.write(eeprom_addr+4, clock_bar_mode);
   EEPROM.write(eeprom_addr+5, clock_use_ntp);
@@ -535,9 +533,9 @@ void action(GyverPortal& p)
 
     if (clock_use_rtc) {
       // Set time to RPC
-      myRTC.setSecond(gptime.hour);
+      myRTC.setSecond(gptime.second);
       myRTC.setMinute(gptime.minute);
-      myRTC.setHour(gptime.second);
+      myRTC.setHour(gptime.hour);
     }
 
     set_clock_time(gptime.hour, gptime.minute, gptime.second);
@@ -630,9 +628,11 @@ int show_bits(int i, const char *disp_text)
     }
     break;
   case 1:
+    // First digit dot is a leading (1 or blank).
     if (disp_text[0]=='1') {
       bits = dot;
     }
+    // Fall through. 
   default:
     if (disp_text[i] == '-') {
       bits |= digit_table[11];
